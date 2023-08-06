@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>ChatApp_Socket</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous" />
+</head>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/2.6.10/vue.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+
+<body>
+    <div id="app">
+        <div class="container">
+            <div class="col-lg-6 offset-lg-3">
+                <div v-if="!ready" class="row" style="margin-top: 10em;">
+                    <!-- Add the Facebook login button -->
+                    <button @click="loginWithFacebook" class="facebook-login">Login with Facebook</button>
+                </div>
+                <div v-if="user" class="row">
+                    <!-- <div class="row">
+                    </div> -->
+                    <img style="    border-radius: 26px;" v-if="user.profilePicture" :src="user.profilePicture"
+                        alt="Profile Picture" />
+
+                    <h2>Welcome, {{ user.name }}!</h2>
+                </div>
+
+                <div v-if="ready">
+                    <p v-for="user in info">
+                        {{user.username}} {{user.type}}
+                    </p>
+                </div>
+
+                <div v-if="!ready">
+                    <h4 class="row">Enter your username</h4>
+                    <form @submit.prevent="addUser">
+                        <div class="form-group row">
+                            <input type="text" class="form-control col-9" v-model="username"
+                                placeholder="Enter username here">
+                            <input type="submit" value="Join" class="btn btn-sm bg-primary ml-1">
+
+                        </div>
+                    </form>
+                </div>
+                <h2 class="row" v-else>UserName: {{username}}</h2>
+                <div class="card bg-primary" v-if="ready">
+                    <div class="card-header text-white">
+                        <h4>My Chat App <span class="float-right">{{connections}} connections</span></h4>
+                    </div>
+                    <ul class="list-group list-group-flush text-right">
+                        <small v-if="typing" style="font-size: large;" class="row text-danger ">{{typing}} is
+                            typing</small>
+                        <li class="list-group-item" v-for="message in messages">
+                            <span :class="{'float-left':message.type === 1}">
+                                {{message.message}}
+                                <small>:{{message.user}}</small>
+                            </span>
+                        </li>
+                    </ul>
+
+                    <div class="card-body">
+                        <form @submit.prevent="send">
+                            <div class="form-group">
+                                <input type="text" class="form-control" v-model="newMessage"
+                                    placeholder="Enter message here">
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+
+
+
+<script>
+    var socket = io();
+    // import axios from 'axios'
+    // Creating a new Vue Instance
+    let vue = new Vue({
+
+        // Adding a root element to our vue app
+        el: '#app',
+        data: {
+            newMessage: null,
+            messages: [],
+            typing: false,
+            username: null,
+            ready: false,
+            info: [],
+            connections: 0,
+            user: ""
+        },
+
+
+        // Our vue created method
+        created() {
+
+            // Emitting 'leave' event on tab closed event.
+            window.onbeforeunload = () => {
+                socket.emit('leave', this.username);
+            }
+
+            // Listening to chat-message event emitted from the server and pushing to messages array
+            socket.on('chat-message', (data) => {
+                this.messages.push({
+                    message: data.message,
+                    type: 1,
+                    user: data.user,
+                });
+            });
+
+
+            socket.on('typing', (data) => {
+                this.typing = data;
+            });
+
+            socket.on('stopTyping', () => {
+                this.typing = false;
+            });
+
+            socket.on('joined', (data) => {
+                this.info.push({
+                    username: data,
+                    type: 'joined'
+                });
+
+                setTimeout(() => {
+                    this.info = [];
+                }, 5000);
+            });
+
+            socket.on('leave', (data) => {
+                this.info.push({
+                    username: data,
+                    type: 'left'
+                });
+
+                setTimeout(() => {
+                    this.info = [];
+                }, 5000);
+            });
+
+            socket.on('connections', (data) => {
+                this.connections = data;
+            });
+        },
+
+        // Vue Watch hook
+        watch: {
+
+            newMessage(value) {
+                value ? socket.emit('typing', this.username) : socket.emit('stopTyping')
+            }
+        },
+
+        methods: {
+            async loginWithFacebook() {
+                try {
+                    // Prompt the user to log in with Facebook
+                    const response = await new Promise((resolve) => {
+                        FB.login((loginResponse) => resolve(loginResponse), { scope: 'public_profile,email' });
+                    });
+
+                    if (response.authResponse) {
+                        const accessToken = response.authResponse.accessToken;
+
+                        // Use the Facebook access token to make API requests
+                        const userDataResponse = await axios.get(`https://graph.facebook.com/me?fields=id,name,email,picture&access_token=${accessToken}`);
+
+                        // Handle the response and extract user data
+                        const userData = userDataResponse.data;
+                        const user = {
+                            id: userData.id,
+                            name: userData.name,
+                            email: userData.email,
+                            profilePicture: userData.picture?.data?.url || null,
+                        };
+
+                        // Update the user state or take any other action with the user data
+                        this.user = user;
+                        localStorage.setItem('SET_USER', JSON.stringify(this.user));
+                        console.log('Logged in as:', this.user);
+                    } else {
+                        // User cancelled the login process
+                        console.log('Facebook login cancelled.');
+                    }
+                } catch (error) {
+                    // Handle any errors that occurred during the request
+                    console.error('Error:', error.message);
+                }
+            },
+            send() {
+                this.messages.push({
+                    message: this.newMessage,
+                    type: 0,
+                    user: 'Me',
+                });
+
+                socket.emit('chat-message', {
+                    message: this.newMessage,
+                    user: this.username
+                });
+                this.newMessage = null;
+            },
+
+            addUser() {
+                this.ready = true;
+                socket.emit('joined', this.username)
+            }
+        },
+
+    });
+</script>
+<script>
+    window.fbAsyncInit = function () {
+        FB.init({
+            appId: '666591475070616',
+            cookie: true,
+            xfbml: true,
+            version: 'v12.0', // Use the latest Facebook Graph API version
+        });
+    };
+
+    // Load the Facebook SDK asynchronously
+    (function (d, s, id) {
+        var js, fjs = d.getElementsByTagName(s)[0];
+        if (d.getElementById(id)) return;
+        js = d.createElement(s); js.id = id;
+        js.src = "https://connect.facebook.net/en_US/sdk.js";
+        fjs.parentNode.insertBefore(js, fjs);
+    }(document, 'script', 'facebook-jssdk'));
+</script>
+<style>
+    .row {
+        display: flex;
+        justify-content: center;
+    }
+
+    .facebook-login:hover {
+        background-color: #0f64c7;
+    }
+
+    .logout-button {
+        background-color: #f00;
+        color: #fff;
+        border: none;
+        outline: none;
+        cursor: pointer;
+        padding: 12px 20px;
+        border-radius: 4px;
+        font-size: 16px;
+        margin-top: 16px;
+    }
+
+    .facebook-login {
+        display: flex;
+        align-items: center;
+        background-color: #1877f2;
+        color: #fff;
+        border: none;
+        outline: none;
+        cursor: pointer;
+        padding: 12px 20px;
+        border-radius: 4px;
+        font-size: 16px;
+    }
+
+    .logout-button:hover {
+        background-color: #d00;
+    }
+
+    .facebook-icon {
+        width: 24px;
+        height: 24px;
+        margin-right: 10px;
+    }
+</style>
+
+</html>
